@@ -1,0 +1,9 @@
+numpy>=1.26
+opencv-python>=4.9
+PyYAML>=6.0
+scipy>=1.11
+torch>=2.2
+ultralytics>=8.4.0
+lap>=0.5.12
+onnxruntime>=1.17
+rtmlib>=0.0.15

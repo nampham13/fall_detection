@@ -1,0 +1,72 @@
+detector:
+  model: yolo26s.pt
+  confidence: 0.25
+  iou: 0.70
+  image_size: 640
+  device: cuda:0
+  half: true
+  tracker_config: configs/bytetrack_fall.yaml
+
+pose:
+  model: auto
+  input_size: [192, 256]
+  backend: onnxruntime
+  device: auto
+  minimum_keypoint_score: 0.25
+  cache_dir: models/rtmlib
+
+identity:
+  maximum_gap_seconds: 1.5
+  maximum_center_distance: 1.25
+  maximum_assignment_cost: 0.85
+  iou_weight: 0.55
+  pose_weight: 0.30
+  center_weight: 0.15
+
+temporal:
+  sequence_length: 48
+  window_seconds: 3.2
+  history_seconds: 12.0
+  minimum_observations: 12
+  maximum_sample_gap_seconds: 0.75
+
+stgcn:
+  checkpoint: models/stgcn_fall.pt
+  input_channels: 7
+  classes: [normal, falling, lying]
+  probability_threshold: 0.70
+  device: cuda:0
+
+rules:
+  lying_aspect_ratio: 1.05
+  lying_axis_horizontalness: 0.62
+  lying_score_threshold: 0.78
+  minimum_lying_aspect_ratio: 0.88
+  minimum_body_horizontalness: 0.68
+  downward_velocity_body_lengths_per_second: 0.70
+  abrupt_orientation_change: 0.40
+  sudden_window_seconds: 0.80
+  lying_confirmation_seconds: 1.25
+  fall_to_lying_max_seconds: 3.0
+  prolonged_lying_seconds: 8.0
+  minimum_track_age_seconds: 0.75
+  minimum_motion_observations: 4
+  minimum_lying_observations: 5
+  watch_score_threshold: 0.70
+  alert_hold_seconds: 2.0
+  recovery_seconds: 2.0
+  minimum_pose_quality: 0.35
+
+scene_cut:
+  enabled: true
+  input_size: [160, 90]
+  pixel_difference_threshold: 0.18
+  histogram_correlation_threshold: 0.65
+  minimum_interval_seconds: 0.50
+
+runtime:
+  display: false
+  output_video: null
+  event_log: outputs/events.jsonl
+  draw_keypoint_threshold: 0.30
+  stale_track_seconds: 3.0

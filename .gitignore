@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.py[cod]
+models/
+outputs/
+data/*
+!data/manifest.example.csv
+*.pt
+*.onnx
+*.engine
+
+# outputs
+outputs/
+
+# environment files
+.env
+.venv/
+
+# agents instructions
+.agents/
+.copilot/
+.claude/
+claude.md
+
+

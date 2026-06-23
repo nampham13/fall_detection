@@ -1,0 +1,4 @@
+video,label,split,subject_id,start_seconds,end_seconds,target_x,target_y
+path/to/subject01_normal.mp4,normal,train,S01,0.0,3.2,0.50,0.50
+path/to/subject02_fall.mp4,falling,validation,S02,1.0,4.2,0.50,0.55
+path/to/subject03_after_fall.mp4,lying,test,S03,4.0,7.2,0.50,0.65

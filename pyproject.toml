@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fall-detection-pipeline"
+version = "0.1.0"
+description = "YOLO26 + RTMPose + ByteTrack + ST-GCN fall detection pipeline"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "numpy>=1.26",
+  "opencv-python>=4.9",
+  "PyYAML>=6.0",
+  "scipy>=1.11",
+  "torch>=2.2",
+  "ultralytics>=8.4.0",
+  "lap>=0.5.12",
+  "onnxruntime>=1.17",
+  "rtmlib>=0.0.15",
+]
+
+[project.scripts]
+fall-detect = "fall_detection.cli:main"
+fall-train-stgcn = "fall_detection.training:main"
+fall-build-dataset = "fall_detection.dataset:main"
+
+[tool.setuptools.packages.find]
+include = ["fall_detection*"]
