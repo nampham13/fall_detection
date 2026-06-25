@@ -49,8 +49,8 @@ class TemporalConfig:
 
 @dataclass(slots=True)
 class STGCNConfig:
-    checkpoint: str = "models/stgcn_fall.pt"
-    input_channels: int = 7
+    config_file: str = "configs/mmaction2/stgcn_fall.py"
+    checkpoint: str = "models/mmaction2/stgcn_fall.pth"
     classes: tuple[str, ...] = ("normal", "falling", "lying")
     probability_threshold: float = 0.70
     device: str = "cuda:0"

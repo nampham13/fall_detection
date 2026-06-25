@@ -31,8 +31,8 @@ temporal:
   maximum_sample_gap_seconds: 0.75
 
 stgcn:
-  checkpoint: models/stgcn_fall.pt
-  input_channels: 7
+  config_file: configs/mmaction2/stgcn_fall.py
+  checkpoint: models/mmaction2/stgcn_fall.pth
   classes: [normal, falling, lying]
   probability_threshold: 0.70
   device: cuda:0

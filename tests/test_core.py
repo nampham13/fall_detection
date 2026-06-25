@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 import torch
@@ -9,13 +11,14 @@ from fall_detection.config import (
     IdentityConfig,
     RuleConfig,
     SceneCutConfig,
+    STGCNConfig,
     TemporalConfig,
 )
 from fall_detection.cli import build_parser
 from fall_detection.identity import SkeletonIdentityResolver
 from fall_detection.rules import FallRuleEngine
 from fall_detection.scene import SceneCutDetector
-from fall_detection.stgcn import STGCN, coco_adjacency
+from fall_detection.stgcn import COCO_EDGES, STGCNRuntime, _to_numpy
 from fall_detection.temporal import SkeletonHistory
 from fall_detection.types import AlertState, PoseObservation, TrackedBox
 
@@ -54,12 +57,27 @@ def observation(
     )
 
 
-class STGCNTests(unittest.TestCase):
-    def test_adjacency_and_forward_shape(self):
-        self.assertEqual(coco_adjacency().shape, (3, 17, 17))
-        model = STGCN(input_channels=7, num_classes=3)
-        output = model(torch.randn(2, 7, 48, 17, 1))
-        self.assertEqual(tuple(output.shape), (2, 3))
+class MMActionSTGCNTests(unittest.TestCase):
+    def test_coco_edge_topology_is_available_for_visualization(self):
+        self.assertEqual(len(COCO_EDGES), 16)
+        self.assertTrue(all(0 <= source < 17 and 0 <= target < 17 for source, target in COCO_EDGES))
+
+    def test_missing_checkpoint_is_fail_fast(self):
+        with TemporaryDirectory() as directory:
+            config_file = Path(directory) / "stgcn.py"
+            config_file.write_text("test_pipeline = []\n", encoding="utf-8")
+            missing_checkpoint = Path(directory) / "missing.pth"
+            with self.assertRaises(FileNotFoundError):
+                STGCNRuntime(
+                    STGCNConfig(
+                        config_file=str(config_file),
+                        checkpoint=str(missing_checkpoint),
+                    )
+                )
+
+    def test_score_tensor_conversion(self):
+        scores = _to_numpy(torch.tensor([0.1, 0.2, 0.7]))
+        self.assertTrue(np.allclose(scores, [0.1, 0.2, 0.7]))
 
 
 class CLITests(unittest.TestCase):
@@ -73,7 +91,7 @@ class CLITests(unittest.TestCase):
 
 
 class TemporalTests(unittest.TestCase):
-    def test_resampled_feature_shape(self):
+    def test_resampled_mmaction_sample_shape(self):
         config = TemporalConfig(
             sequence_length=24,
             window_seconds=2.0,
@@ -84,10 +102,15 @@ class TemporalTests(unittest.TestCase):
         history = SkeletonHistory(config)
         for index in range(13):
             history.add(observation(index * 0.2, pelvis_y=100 + index * 2))
-        features = history.model_input(1)
-        self.assertIsNotNone(features)
-        self.assertEqual(features.shape, (7, 24, 17, 1))
-        self.assertTrue(np.isfinite(features).all())
+        sample = history.mmaction_input(1, label=2, frame_dir="clip_001")
+        self.assertIsNotNone(sample)
+        self.assertEqual(sample["frame_dir"], "clip_001")
+        self.assertEqual(sample["label"], 2)
+        self.assertEqual(sample["total_frames"], 24)
+        self.assertEqual(sample["keypoint"].shape, (1, 24, 17, 2))
+        self.assertEqual(sample["keypoint_score"].shape, (1, 24, 17))
+        self.assertTrue(np.isfinite(sample["keypoint"]).all())
+        self.assertTrue(np.isfinite(sample["keypoint_score"]).all())
 
 
 class IdentityTests(unittest.TestCase):

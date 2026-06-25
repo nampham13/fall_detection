@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from typing import Any
 
 import numpy as np
 
@@ -48,7 +49,33 @@ class SkeletonHistory:
     def clear(self) -> None:
         self._history.clear()
 
-    def model_input(self, track_id: int) -> np.ndarray | None:
+    def mmaction_input(
+        self,
+        track_id: int,
+        *,
+        label: int = -1,
+        frame_dir: str | None = None,
+    ) -> dict[str, Any] | None:
+        sampled = self._sample_track(track_id)
+        if sampled is None:
+            return None
+
+        height, width = sampled["frame_size"]
+        keypoints = sampled["keypoints"][None].astype(np.float32)
+        scores = np.clip(sampled["scores"], 0.0, 1.0)[None].astype(np.float32)
+        return {
+            "frame_dir": frame_dir or f"track_{track_id}",
+            "label": int(label),
+            "img_shape": (int(height), int(width)),
+            "original_shape": (int(height), int(width)),
+            "total_frames": int(keypoints.shape[1]),
+            "keypoint": keypoints,
+            "keypoint_score": scores,
+            "modality": "Pose",
+            "start_index": 0,
+        }
+
+    def _sample_track(self, track_id: int) -> dict[str, Any] | None:
         history = self.get(track_id)
         if len(history) < self.config.minimum_observations:
             return None
@@ -74,46 +101,12 @@ class SkeletonHistory:
         )
         keypoints = np.stack([item.keypoints for item in selected])
         scores = np.stack([item.scores for item in selected])
-        bboxes = np.stack([item.bbox for item in selected])
-        frame_heights = np.asarray([item.frame_size[0] for item in selected], dtype=np.float32)
 
-        sampled_keypoints = _interpolate(times, keypoints, target_times)
-        sampled_scores = np.clip(_interpolate(times, scores, target_times), 0.0, 1.0)
-        sampled_bboxes = _interpolate(times, bboxes, target_times)
-        sampled_heights = _interpolate(times, frame_heights, target_times)
-
-        hips = sampled_keypoints[:, [COCO_LEFT_HIP, COCO_RIGHT_HIP]]
-        hip_scores = sampled_scores[:, [COCO_LEFT_HIP, COCO_RIGHT_HIP]]
-        hip_weights = (hip_scores >= 0.25).astype(np.float32)
-        weight_sum = np.sum(hip_weights, axis=1, keepdims=True)
-        pelvis = np.sum(hips * hip_weights[..., None], axis=1) / np.maximum(weight_sum, 1.0)
-        fallback = (sampled_bboxes[:, :2] + sampled_bboxes[:, 2:]) * 0.5
-        pelvis[weight_sum[:, 0] == 0] = fallback[weight_sum[:, 0] == 0]
-
-        widths = np.maximum(sampled_bboxes[:, 2] - sampled_bboxes[:, 0], 1.0)
-        heights = np.maximum(sampled_bboxes[:, 3] - sampled_bboxes[:, 1], 1.0)
-        scale = heights[:, None, None]
-        relative = (sampled_keypoints - pelvis[:, None, :]) / scale
-        relative[sampled_scores < 0.05] = 0.0
-
-        dt = max(self.config.window_seconds / (self.config.sequence_length - 1), 1e-3)
-        velocity = np.gradient(relative, dt, axis=0)
-        root_y = np.clip(pelvis[:, 1] / np.maximum(sampled_heights, 1.0), 0.0, 1.5)
-        aspect = np.clip(widths / heights, 0.0, 3.0)
-
-        channels = np.stack(
-            [
-                relative[:, :, 0],
-                relative[:, :, 1],
-                sampled_scores,
-                velocity[:, :, 0],
-                velocity[:, :, 1],
-                np.repeat(root_y[:, None], 17, axis=1),
-                np.repeat(aspect[:, None], 17, axis=1),
-            ],
-            axis=0,
-        ).astype(np.float32)
-        return channels[:, :, :, None]
+        return {
+            "keypoints": _interpolate(times, keypoints, target_times),
+            "scores": np.clip(_interpolate(times, scores, target_times), 0.0, 1.0),
+            "frame_size": selected[-1].frame_size,
+        }
 
 
 def _interpolate(

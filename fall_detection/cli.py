@@ -41,11 +41,6 @@ def main() -> None:
         config.runtime.event_log = args.event_log
 
     pipeline = FallDetectionPipeline(config)
-    if not pipeline.stgcn.ready:
-        print(
-            "WARNING: ST-GCN checkpoint is not ready. The pipeline will emit only "
-            f"rule-based suspected events. Detail: {pipeline.stgcn.load_error}"
-        )
     pipeline.run(_source(args.source))
 
 

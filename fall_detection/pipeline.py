@@ -95,8 +95,8 @@ class FallDetectionPipeline:
         decisions: list[FallDecision] = []
         for observation in observations:
             self.history.add(observation)
-            model_features = self.history.model_input(observation.track_id)
-            probabilities = self.stgcn.predict(model_features)
+            model_sample = self.history.mmaction_input(observation.track_id)
+            probabilities = self.stgcn.predict(model_sample)
             decision = self.rules.evaluate(
                 self.history.get(observation.track_id),
                 probabilities,

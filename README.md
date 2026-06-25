@@ -14,7 +14,7 @@ video
   -> RTMPose-s top-down (COCO-17)
   -> pose-aware ID repair
   -> temporal buffer được resample theo thời gian
-  -> ST-GCN (normal / falling / lying)
+  -> MMAction2 ST-GCN (normal / falling / lying)
   -> state machine: abrupt fall + prolonged lying
   -> suspected / confirmed event
 ```
@@ -36,7 +36,8 @@ một sự kiện ngã. Scene cut được ghi riêng trong JSONL audit log.
 
 RTMPose-s 256x192 được chọn cho GTX 1650 4 GB. Trong môi trường hiện tại,
 ONNX Runtime không thấy `CUDAExecutionProvider`, nên RTMPose tự chạy CPU trong khi
-YOLO26s và ST-GCN chạy CUDA. Chi phí pose tăng gần tuyến tính theo số người.
+YOLO26s chạy CUDA. MMAction2 ST-GCN sẽ chạy theo `stgcn.device` khi checkpoint đã
+được train/export. Chi phí pose tăng gần tuyến tính theo số người.
 
 Smoke benchmark ngày 23-06-2026 trên máy hiện tại, ảnh 1080x810 có 5 người:
 YOLO26s + ByteTrack khoảng 19.3 FPS; toàn pipeline detector + RTMPose khoảng
@@ -52,8 +53,9 @@ test set có annotation.
 
 ## Safety gate bắt buộc
 
-- Không có checkpoint `models/stgcn_fall.pt`: hệ thống chỉ xuất `suspected`, không
-  bao giờ xuất `confirmed`.
+- MMAction2 ST-GCN là dependency bắt buộc. Nếu thiếu `mmaction2/mmengine/mmcv`,
+  thiếu config, hoặc thiếu checkpoint `models/mmaction2/stgcn_fall.pth`, pipeline
+  dừng ngay lúc khởi tạo thay vì âm thầm chạy rule-only.
 - `confirmed` cần đồng thuận giữa ST-GCN và bằng chứng động học/thời gian.
 - Không dùng accuracy theo frame làm tiêu chí release. Tối thiểu phải báo cáo:
   event sensitivity, event precision, false alarms/camera-hour, missed falls,
@@ -81,11 +83,15 @@ và đã có Torch, Ultralytics, RTMLib, OpenCV.
 
 ```powershell
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -U pip openmim
+.\.venv\Scripts\python.exe -m mim install mmengine
+.\.venv\Scripts\python.exe -m mim install "mmcv>=2.0.0,<2.2.0"
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Lần chạy đầu sẽ tải `yolo26s.pt` và RTMPose-s. RTMPose được cache dưới
-`models/rtmlib`.
+`models/rtmlib`. Trước khi inference production, cần train/fine-tune ST-GCN và có
+checkpoint tại `models/mmaction2/stgcn_fall.pth`.
 
 ## Chạy inference
 
@@ -112,41 +118,30 @@ Xem trực tiếp khi xử lý video:
 
 Nhấn `q` hoặc `Esc` để dừng. `--display` vẫn được giữ làm alias tương thích.
 
-Khi ST-GCN chưa được train, CLI sẽ in cảnh báo rõ ràng. Các ngưỡng trong
+Khi ST-GCN/MMAction2 chưa sẵn sàng, CLI sẽ dừng với lỗi rõ ràng. Các ngưỡng trong
 [`configs/default.yaml`](configs/default.yaml) chỉ là giá trị khởi tạo, không phải
 ngưỡng production đã calibration.
 
 ## Dữ liệu ST-GCN
 
-Mỗi sample là một file `.npz`:
+Dataset ST-GCN dùng format `PoseDataset` của MMAction2, lưu trong một file `.pkl`.
+Mỗi annotation chứa:
 
-```python
-np.savez_compressed(
-    "sample.npz",
-    x=features,  # float32 [7, T, 17, 1]
-    y=label,     # 0=normal, 1=falling, 2=lying
-)
-```
+- `frame_dir`: ID duy nhất của sample.
+- `label`: `0=normal`, `1=falling`, `2=lying`.
+- `img_shape`, `original_shape`, `total_frames`.
+- `keypoint`: `float32 [M, T, 17, 2]`, hiện `M=1`.
+- `keypoint_score`: `float32 [M, T, 17]`.
 
-7 channel được tạo bởi `SkeletonHistory.model_input()`:
-
-1. x tương đối với pelvis / chiều cao bbox
-2. y tương đối với pelvis / chiều cao bbox
-3. keypoint confidence
-4. vận tốc x tương đối
-5. vận tốc y tương đối
-6. pelvis y / chiều cao frame
-7. bbox width / height
-
-Hai channel cuối giữ chuyển động toàn cục và tư thế nằm; nếu chỉ center/scale pose
-từng frame, tín hiệu người đang hạ xuống sẽ bị toán học loại bỏ.
+Format này khớp trực tiếp với `PreNormalize2D -> GenSkeFeat -> FormatGCNInput` của
+MMAction2 trong [`configs/mmaction2/stgcn_fall.py`](configs/mmaction2/stgcn_fall.py).
 
 Tạo feature bằng manifest đã chia split:
 
 ```powershell
 .\.venv\Scripts\python.exe -m fall_detection.dataset `
   --manifest data\manifest.csv `
-  --output data\processed
+  --output data\mmaction\fall_skeleton.pkl
 ```
 
 Schema nằm tại [`data/manifest.example.csv`](data/manifest.example.csv).
@@ -154,13 +149,14 @@ Schema nằm tại [`data/manifest.example.csv`](data/manifest.example.csv).
 trống tool chọn người có bbox lớn nhất. Với cảnh nhiều người, nên luôn annotation
 target để tránh label sai người.
 
-Trainer bắt buộc nhận hai thư mục tách biệt:
+Trainer dùng Runner của MMAction2, không còn model PyTorch tự viết:
 
 ```powershell
 .\.venv\Scripts\python.exe -m fall_detection.training `
-  --train-data data\processed\train `
-  --validation-data data\processed\validation `
-  --output models\stgcn_fall.pt
+  --config configs\mmaction2\stgcn_fall.py `
+  --ann-file data\mmaction\fall_skeleton.pkl `
+  --work-dir work_dirs\stgcn_fall `
+  --export-checkpoint models\mmaction2\stgcn_fall.pth
 ```
 
 Không release model chỉ dựa trên validation này. Cần một test set khóa, độc lập về
@@ -172,8 +168,8 @@ subject/camera/site, và calibration threshold trên validation riêng.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Test hiện có kiểm tra graph/model shape, resampling thời gian, nối ID sau ID switch,
-fall đột ngột và nằm kéo dài.
+Test hiện có kiểm tra format MMAction2 skeleton sample, fail-fast khi thiếu ST-GCN
+checkpoint, nối ID sau ID switch, fall đột ngột và nằm kéo dài.
 
 ## Việc cần làm trước production
 

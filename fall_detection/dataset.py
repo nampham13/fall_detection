@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import json
+import pickle
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,26 +67,25 @@ class SkeletonDatasetBuilder:
         self.detector = Yolo26ByteTracker(config.detector)
         self.pose = RTMPose17(config.pose)
 
-    def build(self, rows: list[ManifestRow], output_root: str | Path) -> None:
-        output_root = Path(output_root)
+    def build(self, rows: list[ManifestRow], output: str | Path) -> None:
+        output_path = _annotation_path(output)
+        annotations: list[dict[str, object]] = []
+        splits: dict[str, list[str]] = {"train": [], "validation": [], "test": []}
         for index, row in enumerate(rows):
-            features, metadata = self._extract(row)
-            destination = (
-                output_root
-                / row.split
-                / _safe_name(row.subject_id)
-                / f"sample_{index:06d}.npz"
+            frame_dir = (
+                f"{row.split}_{index:06d}_{_safe_name(row.subject_id)}_{row.label}"
             )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(
-                destination,
-                x=features,
-                y=np.int64(LABELS[row.label]),
-                metadata=np.asarray(json.dumps(metadata, ensure_ascii=False)),
-            )
-            print(f"[{index + 1}/{len(rows)}] {destination}")
+            sample = self._extract(row, frame_dir)
+            annotations.append(sample)
+            splits[row.split].append(frame_dir)
+            print(f"[{index + 1}/{len(rows)}] {frame_dir}")
 
-    def _extract(self, row: ManifestRow) -> tuple[np.ndarray, dict[str, object]]:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with output_path.open("wb") as handle:
+            pickle.dump({"annotations": annotations, "split": splits}, handle)
+        print(f"Wrote MMAction2 PoseDataset annotations: {output_path}")
+
+    def _extract(self, row: ManifestRow, frame_dir: str) -> dict[str, object]:
         if row.end_seconds - row.start_seconds < self.config.temporal.window_seconds:
             raise ValueError(
                 f"{row.video}: sample duration must be >= "
@@ -137,20 +136,16 @@ class SkeletonDatasetBuilder:
 
         if target_track_id is None:
             raise RuntimeError(f"{row.video}: no target person found")
-        features = history.model_input(target_track_id)
-        if features is None:
+        sample = history.mmaction_input(
+            target_track_id,
+            label=LABELS[row.label],
+            frame_dir=frame_dir,
+        )
+        if sample is None:
             raise RuntimeError(
                 f"{row.video}: insufficient/fragmented pose history for sample"
             )
-        return features, {
-            "video": row.video,
-            "label": row.label,
-            "split": row.split,
-            "subject_id": row.subject_id,
-            "start_seconds": row.start_seconds,
-            "end_seconds": row.end_seconds,
-            "target_track_id": target_track_id,
-        }
+        return sample
 
     @staticmethod
     def _select_target(
@@ -187,12 +182,23 @@ def _safe_name(value: str) -> str:
     return "".join(character if character.isalnum() or character in "-_" else "_" for character in value)
 
 
+def _annotation_path(output: str | Path) -> Path:
+    path = Path(output)
+    if path.suffix.lower() in {".pkl", ".pickle"}:
+        return path
+    return path / "fall_skeleton.pkl"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Build ST-GCN NPZ samples from an explicitly split CSV manifest"
+        description="Build MMAction2 PoseDataset annotations from an explicitly split CSV manifest"
     )
     parser.add_argument("--manifest", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="Output .pkl path, or a directory where fall_skeleton.pkl will be written",
+    )
     parser.add_argument("--config", default="configs/default.yaml")
     return parser
 
@@ -205,4 +211,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
