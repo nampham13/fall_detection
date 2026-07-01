@@ -83,10 +83,17 @@ và đã có Torch, Ultralytics, RTMLib, OpenCV.
 
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -U pip openmim
-.\.venv\Scripts\python.exe -m mim install mmengine
-.\.venv\Scripts\python.exe -m mim install "mmcv>=2.0.0,<2.2.0"
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+\.\.venv\Scripts\python.exe -m pip install -U pip
+\.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Nếu bạn cần nhánh ST-GCN/MMAction2, cài thêm trên Python 3.11 hoặc 3.12:
+
+```powershell
+\.\.venv\Scripts\python.exe -m pip install -U openmim
+\.\.venv\Scripts\python.exe -m mim install mmengine
+\.\.venv\Scripts\python.exe -m mim install "mmcv>=2.0.0,<2.2.0"
+\.\.venv\Scripts\python.exe -m pip install mmaction2
 ```
 
 Lần chạy đầu sẽ tải `yolo26s.pt` và RTMPose-s. RTMPose được cache dưới
