@@ -3,9 +3,27 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-from .stgcn import COCO_EDGES
 from .types import AlertState, FallDecision, PoseObservation
 
+
+COCO_EDGES = (
+    (0, 1),
+    (0, 2),
+    (1, 3),
+    (2, 4),
+    (5, 6),
+    (5, 7),
+    (7, 9),
+    (6, 8),
+    (8, 10),
+    (5, 11),
+    (6, 12),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (12, 14),
+    (14, 16),
+)
 
 STATE_COLORS = {
     AlertState.NORMAL: (60, 200, 60),
@@ -38,10 +56,12 @@ def draw_observation(
         if score >= keypoint_threshold:
             cv2.circle(frame, tuple(point.astype(int)), 3, color, -1, cv2.LINE_AA)
 
-    model_probability = sum(
-        decision.model_probabilities.get(name, 0.0) for name in ("falling", "lying")
-    )
-    model_text = f"p={model_probability:.2f}" if decision.model_ready else "model=NOT_READY"
+    model_text = ""
+    if decision.model_ready and decision.model_probabilities:
+        model_probability = sum(
+            decision.model_probabilities.get(name, 0.0) for name in ("falling", "lying")
+        )
+        model_text = f"p={model_probability:.2f}"
     label = (
         f"ID {observation.track_id} {decision.state.value.upper()} "
         f"rule={decision.rule_score:.2f} {model_text}"
@@ -62,7 +82,7 @@ def draw_status_bar(
     frame: np.ndarray, fps: float, model_ready: bool, pose_device: str
 ) -> None:
     text = (
-        f"Pipeline FPS: {fps:.1f} | ST-GCN: "
+        f"Pipeline FPS: {fps:.1f} | HPI-GCN: "
         f"{'READY' if model_ready else 'NOT TRAINED'} | RTMPose: {pose_device}"
     )
     cv2.rectangle(frame, (0, 0), (frame.shape[1], 30), (25, 25, 25), -1)

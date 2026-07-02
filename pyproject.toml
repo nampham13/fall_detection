@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fall-detection-pipeline"
 version = "0.1.0"
-description = "YOLO26 + RTMPose + ByteTrack + ST-GCN fall detection pipeline"
+description = "YOLO26 + RTMPose + ByteTrack fall detection pipeline"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   "numpy>=1.26",
@@ -19,18 +19,9 @@ dependencies = [
   "rtmlib>=0.0.15",
 ]
 
-[project.optional-dependencies]
-stgcn = [
-  "openmim>=0.3.9",
-  "mmengine>=0.10.0",
-  "mmcv>=2.0.0,<2.2.0",
-  "mmaction2>=1.2.0",
-]
-
 [project.scripts]
 fall-detect = "fall_detection.cli:main"
-fall-train-stgcn = "fall_detection.training:main"
-fall-build-dataset = "fall_detection.dataset:main"
+fall-benchmark-yolo-pose = "fall_detection.benchmark:main"
 
 [tool.setuptools.packages.find]
 include = ["fall_detection*"]

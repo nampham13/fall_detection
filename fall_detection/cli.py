@@ -13,7 +13,7 @@ def _source(value: str) -> str | int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="YOLO26 + RTMPose + ByteTrack + ST-GCN fall detection"
+        description="YOLO26 + RTMPose + ByteTrack + HPI-GCN fall detection"
     )
     parser.add_argument("--source", required=True, help="Video path, RTSP URL, or camera index")
     parser.add_argument("--config", default="configs/default.yaml")

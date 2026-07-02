@@ -1,24 +1,19 @@
 from __future__ import annotations
 
 import unittest
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import numpy as np
-import torch
 
 from fall_detection.config import (
     IdentityConfig,
     RuleConfig,
     SceneCutConfig,
-    STGCNConfig,
     TemporalConfig,
 )
 from fall_detection.cli import build_parser
 from fall_detection.identity import SkeletonIdentityResolver
 from fall_detection.rules import FallRuleEngine
 from fall_detection.scene import SceneCutDetector
-from fall_detection.stgcn import COCO_EDGES, STGCNRuntime, _to_numpy
 from fall_detection.temporal import SkeletonHistory
 from fall_detection.types import AlertState, PoseObservation, TrackedBox
 
@@ -57,29 +52,6 @@ def observation(
     )
 
 
-class MMActionSTGCNTests(unittest.TestCase):
-    def test_coco_edge_topology_is_available_for_visualization(self):
-        self.assertEqual(len(COCO_EDGES), 16)
-        self.assertTrue(all(0 <= source < 17 and 0 <= target < 17 for source, target in COCO_EDGES))
-
-    def test_missing_checkpoint_is_fail_fast(self):
-        with TemporaryDirectory() as directory:
-            config_file = Path(directory) / "stgcn.py"
-            config_file.write_text("test_pipeline = []\n", encoding="utf-8")
-            missing_checkpoint = Path(directory) / "missing.pth"
-            with self.assertRaises(FileNotFoundError):
-                STGCNRuntime(
-                    STGCNConfig(
-                        config_file=str(config_file),
-                        checkpoint=str(missing_checkpoint),
-                    )
-                )
-
-    def test_score_tensor_conversion(self):
-        scores = _to_numpy(torch.tensor([0.1, 0.2, 0.7]))
-        self.assertTrue(np.allclose(scores, [0.1, 0.2, 0.7]))
-
-
 class CLITests(unittest.TestCase):
     def test_show_enables_preview(self):
         args = build_parser().parse_args(["--source", "video.mp4", "--show"])
@@ -88,29 +60,6 @@ class CLITests(unittest.TestCase):
     def test_display_remains_a_backward_compatible_alias(self):
         args = build_parser().parse_args(["--source", "0", "--display"])
         self.assertTrue(args.show)
-
-
-class TemporalTests(unittest.TestCase):
-    def test_resampled_mmaction_sample_shape(self):
-        config = TemporalConfig(
-            sequence_length=24,
-            window_seconds=2.0,
-            history_seconds=4.0,
-            minimum_observations=8,
-            maximum_sample_gap_seconds=0.5,
-        )
-        history = SkeletonHistory(config)
-        for index in range(13):
-            history.add(observation(index * 0.2, pelvis_y=100 + index * 2))
-        sample = history.mmaction_input(1, label=2, frame_dir="clip_001")
-        self.assertIsNotNone(sample)
-        self.assertEqual(sample["frame_dir"], "clip_001")
-        self.assertEqual(sample["label"], 2)
-        self.assertEqual(sample["total_frames"], 24)
-        self.assertEqual(sample["keypoint"].shape, (1, 24, 17, 2))
-        self.assertEqual(sample["keypoint_score"].shape, (1, 24, 17))
-        self.assertTrue(np.isfinite(sample["keypoint"]).all())
-        self.assertTrue(np.isfinite(sample["keypoint_score"]).all())
 
 
 class IdentityTests(unittest.TestCase):
@@ -155,12 +104,12 @@ class RuleTests(unittest.TestCase):
         ]
         for item in sequence:
             history.append(item)
-            decision = engine.evaluate(history, {}, model_ready=False)
+            decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertEqual(decision.state, AlertState.WATCH)
 
         for timestamp in (1.1, 1.5, 1.9, 2.2):
             history.append(observation(timestamp, lying=True, pelvis_y=190))
-            decision = engine.evaluate(history, {}, model_ready=False)
+            decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertEqual(decision.state, AlertState.SUSPECTED)
         self.assertFalse(decision.model_ready)
 
@@ -170,8 +119,8 @@ class RuleTests(unittest.TestCase):
             observation(0.0, pelvis_y=100),
             observation(0.1, lying=True, pelvis_y=190),
         ]
-        engine.evaluate(history[:1], {}, model_ready=False)
-        decision = engine.evaluate(history, {}, model_ready=False)
+        engine.evaluate(history[:1], model_probabilities={}, model_ready=False)
+        decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertNotEqual(decision.state, AlertState.SUSPECTED)
 
     def test_bending_with_vertical_legs_is_not_lying(self):
@@ -186,7 +135,7 @@ class RuleTests(unittest.TestCase):
         for timestamp in (0.0, 0.3, 0.6):
             item = observation(timestamp, pelvis_y=120 + timestamp * 30)
             history.append(item)
-            engine.evaluate(history, {}, model_ready=False)
+            engine.evaluate(history, model_probabilities={}, model_ready=False)
 
         for timestamp in (0.9, 1.3, 1.7):
             item = observation(timestamp, pelvis_y=180)
@@ -200,7 +149,7 @@ class RuleTests(unittest.TestCase):
             item.keypoints[16] = (110, 240)
             item.bbox = np.array([60, 100, 180, 250], dtype=np.float32)
             history.append(item)
-            decision = engine.evaluate(history, {}, model_ready=False)
+            decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertNotEqual(decision.state, AlertState.SUSPECTED)
 
     def test_alert_is_held_to_prevent_oscillation(self):
@@ -217,19 +166,19 @@ class RuleTests(unittest.TestCase):
             observation(2.2, lying=True, pelvis_y=190),
         ):
             history.append(item)
-            decision = engine.evaluate(history, {}, model_ready=False)
+            decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertEqual(decision.state, AlertState.SUSPECTED)
 
         history.append(observation(2.3, lying=False, pelvis_y=130))
-        decision = engine.evaluate(history, {}, model_ready=False)
+        decision = engine.evaluate(history, model_probabilities={}, model_ready=False)
         self.assertEqual(decision.state, AlertState.SUSPECTED)
 
     def test_prolonged_lying_is_suspected(self):
         engine = FallRuleEngine(RuleConfig(prolonged_lying_seconds=8.0), 0.7)
         first = observation(0.0, lying=True, pelvis_y=180)
-        engine.evaluate([first], {}, model_ready=False)
+        engine.evaluate([first], model_probabilities={}, model_ready=False)
         second = observation(9.0, lying=True, pelvis_y=180)
-        decision = engine.evaluate([first, second], {}, model_ready=False)
+        decision = engine.evaluate([first, second], model_probabilities={}, model_ready=False)
         self.assertEqual(decision.state, AlertState.SUSPECTED)
         self.assertGreaterEqual(decision.lying_duration, 8.0)
 

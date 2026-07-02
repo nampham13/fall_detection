@@ -14,7 +14,7 @@ from .identity import SkeletonIdentityResolver
 from .pose import RTMPose17
 from .rules import FallRuleEngine
 from .scene import SceneCutDetector, SceneCutResult
-from .stgcn import STGCNRuntime
+from .gcn import GCNRuntime
 from .temporal import SkeletonHistory
 from .types import AlertState, FallDecision
 from .visualization import draw_observation, draw_status_bar
@@ -73,9 +73,9 @@ class FallDetectionPipeline:
         self.identity = SkeletonIdentityResolver(config.identity)
         self.history = SkeletonHistory(config.temporal)
         self.scene_cut = SceneCutDetector(config.scene_cut)
-        self.stgcn = STGCNRuntime(config.stgcn)
+        self.gcn = GCNRuntime(config.gcn)
         self.rules = FallRuleEngine(
-            config.rules, model_threshold=config.stgcn.probability_threshold
+            config.rules, model_threshold=config.gcn.probability_threshold
         )
         self.events = EventLogger(config.runtime.event_log)
 
@@ -88,19 +88,19 @@ class FallDetectionPipeline:
 
         height, width = frame.shape[:2]
         tracked_boxes = self.detector(frame)
-        poses = self.pose(frame, tracked_boxes)
+        poses = self.pose(frame, tracked_boxes, timestamp=timestamp)
         observations = self.identity.resolve(timestamp, (height, width), poses)
 
         output = frame.copy()
         decisions: list[FallDecision] = []
         for observation in observations:
             self.history.add(observation)
-            model_sample = self.history.mmaction_input(observation.track_id)
-            probabilities = self.stgcn.predict(model_sample)
+            model_sample = self.history.get_gcn_input(observation.track_id)
+            probabilities = self.gcn.predict(model_sample)
             decision = self.rules.evaluate(
                 self.history.get(observation.track_id),
-                probabilities,
-                model_ready=self.stgcn.ready,
+                model_probabilities=probabilities,
+                model_ready=self.gcn.ready,
             )
             decisions.append(decision)
             self.events.write(decision)
@@ -154,7 +154,7 @@ class FallDetectionPipeline:
                 rendered, _ = self.process_frame(frame, timestamp)
                 frame_index += 1
                 pipeline_fps = frame_index / max(time.perf_counter() - started, 1e-6)
-                draw_status_bar(rendered, pipeline_fps, self.stgcn.ready, self.pose.device)
+                draw_status_bar(rendered, pipeline_fps, self.gcn.ready, self.pose.device)
 
                 if writer is not None:
                     writer.write(rendered)

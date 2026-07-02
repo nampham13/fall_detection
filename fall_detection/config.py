@@ -20,12 +20,14 @@ class DetectorConfig:
 
 @dataclass(slots=True)
 class PoseConfig:
-    model: str = "auto"
+    model: str = "models/rtmlib/hub/checkpoints/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx"
     input_size: tuple[int, int] = (192, 256)
     backend: str = "onnxruntime"
     device: str = "auto"
     minimum_keypoint_score: float = 0.25
     cache_dir: str = "models/rtmlib"
+    cache_max_age_seconds: float = 0.12
+    cache_min_bbox_iou: float = 0.95
 
 
 @dataclass(slots=True)
@@ -48,9 +50,8 @@ class TemporalConfig:
 
 
 @dataclass(slots=True)
-class STGCNConfig:
-    config_file: str = "configs/mmaction2/stgcn_fall.py"
-    checkpoint: str = "models/mmaction2/stgcn_fall.pth"
+class GCNConfig:
+    checkpoint: str = "models/rtmlib/hub/checkpoints/best_hpi.pt"
     classes: tuple[str, ...] = ("normal", "falling", "lying")
     probability_threshold: float = 0.70
     device: str = "cuda:0"
@@ -102,7 +103,7 @@ class AppConfig:
     pose: PoseConfig = field(default_factory=PoseConfig)
     identity: IdentityConfig = field(default_factory=IdentityConfig)
     temporal: TemporalConfig = field(default_factory=TemporalConfig)
-    stgcn: STGCNConfig = field(default_factory=STGCNConfig)
+    gcn: GCNConfig = field(default_factory=GCNConfig)
     rules: RuleConfig = field(default_factory=RuleConfig)
     scene_cut: SceneCutConfig = field(default_factory=SceneCutConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
@@ -126,7 +127,7 @@ def load_config(path: str | Path) -> AppConfig:
         pose=_build(PoseConfig, raw.get("pose")),
         identity=_build(IdentityConfig, raw.get("identity")),
         temporal=_build(TemporalConfig, raw.get("temporal")),
-        stgcn=_build(STGCNConfig, raw.get("stgcn")),
+        gcn=_build(GCNConfig, raw.get("gcn")),
         rules=_build(RuleConfig, raw.get("rules")),
         scene_cut=_build(SceneCutConfig, raw.get("scene_cut")),
         runtime=_build(RuntimeConfig, raw.get("runtime")),

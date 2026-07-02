@@ -49,13 +49,8 @@ class SkeletonHistory:
     def clear(self) -> None:
         self._history.clear()
 
-    def mmaction_input(
-        self,
-        track_id: int,
-        *,
-        label: int = -1,
-        frame_dir: str | None = None,
-    ) -> dict[str, Any] | None:
+    def get_gcn_input(self, track_id: int) -> dict[str, Any] | None:
+        """Get skeleton input for HPI-GCN model."""
         sampled = self._sample_track(track_id)
         if sampled is None:
             return None
@@ -64,15 +59,10 @@ class SkeletonHistory:
         keypoints = sampled["keypoints"][None].astype(np.float32)
         scores = np.clip(sampled["scores"], 0.0, 1.0)[None].astype(np.float32)
         return {
-            "frame_dir": frame_dir or f"track_{track_id}",
-            "label": int(label),
-            "img_shape": (int(height), int(width)),
-            "original_shape": (int(height), int(width)),
-            "total_frames": int(keypoints.shape[1]),
             "keypoint": keypoints,
             "keypoint_score": scores,
-            "modality": "Pose",
-            "start_index": 0,
+            "img_shape": (int(height), int(width)),
+            "original_shape": (int(height), int(width)),
         }
 
     def _sample_track(self, track_id: int) -> dict[str, Any] | None:

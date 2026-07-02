@@ -68,7 +68,7 @@ def _pelvis_y(observation: PoseObservation) -> float:
 
 
 class FallRuleEngine:
-    def __init__(self, config: RuleConfig, model_threshold: float):
+    def __init__(self, config: RuleConfig, model_threshold: float = 0.7):
         self.config = config
         self.model_threshold = model_threshold
         self._states: dict[int, _TrackRuleState] = {}
@@ -76,8 +76,8 @@ class FallRuleEngine:
     def evaluate(
         self,
         history: list[PoseObservation],
-        probabilities: dict[str, float],
-        model_ready: bool,
+        model_probabilities: dict[str, float] | None = None,
+        model_ready: bool = False,
     ) -> FallDecision:
         current = history[-1]
         track_state = self._states.setdefault(current.track_id, _TrackRuleState())
@@ -159,9 +159,11 @@ class FallRuleEngine:
         fall_then_lying = candidate_active and stable_lying
         evidence = fall_then_lying or prolonged
 
-        model_fall_probability = probabilities.get("falling", 0.0) + probabilities.get(
-            "lying", 0.0
-        )
+        model_fall_probability = 0.0
+        if model_probabilities:
+            model_fall_probability = model_probabilities.get("falling", 0.0) + model_probabilities.get(
+                "lying", 0.0
+            )
         model_confirms = (
             model_ready
             and evidence
@@ -178,7 +180,7 @@ class FallRuleEngine:
                 track_state.alert_since = now
             if model_confirms or track_state.state == AlertState.CONFIRMED:
                 track_state.state = AlertState.CONFIRMED
-                reason = "ST-GCN and fall-to-lying temporal evidence agree"
+                reason = "HPI-GCN and fall-to-lying temporal evidence agree"
             else:
                 track_state.state = AlertState.SUSPECTED
                 reason = (
@@ -231,7 +233,7 @@ class FallRuleEngine:
             timestamp=now,
             state=track_state.state,
             rule_score=rule_score,
-            model_probabilities=probabilities,
+            model_probabilities=model_probabilities,
             lying_duration=lying_duration,
             reason=reason,
             model_ready=model_ready,

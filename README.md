@@ -1,4 +1,4 @@
-# Fall detection: YOLO26 + RTMPose + tracking + ST-GCN
+# Fall detection: YOLO26 + RTMPose + tracking + rule-based fall detection
 
 Pipeline này là baseline kỹ thuật có cơ chế fail-safe, chưa phải thiết bị y tế hay hệ
 thống cảnh báo production đã được chứng nhận.
@@ -14,9 +14,9 @@ video
   -> RTMPose-s top-down (COCO-17)
   -> pose-aware ID repair
   -> temporal buffer được resample theo thời gian
-  -> MMAction2 ST-GCN (normal / falling / lying)
+  -> rule-based fall detection (abrupt fall + prolonged lying)
   -> state machine: abrupt fall + prolonged lying
-  -> suspected / confirmed event
+  -> suspected event
 ```
 
 ID được tạo từ bbox trước rồi gắn skeleton vào ID. Đây là chủ ý: keypoint thường mất
@@ -34,10 +34,12 @@ Pipeline cũng phát hiện hard scene cut. Khi video đổi cảnh, ByteTrack, 
 và rule evidence được reset để chuyển động ở hai cảnh khác nhau không bị nối thành
 một sự kiện ngã. Scene cut được ghi riêng trong JSONL audit log.
 
-RTMPose-s 256x192 được chọn cho GTX 1650 4 GB. Trong môi trường hiện tại,
-ONNX Runtime không thấy `CUDAExecutionProvider`, nên RTMPose tự chạy CPU trong khi
-YOLO26s chạy CUDA. MMAction2 ST-GCN sẽ chạy theo `stgcn.device` khi checkpoint đã
-được train/export. Chi phí pose tăng gần tuyến tính theo số người.
+RTMPose-s 256x192 được chọn cho GTX 1650 4 GB. Mặc định pipeline dùng checkpoint
+local `models/rtmlib/hub/checkpoints/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx`;
+trong môi trường hiện tại, ONNX Runtime không thấy `CUDAExecutionProvider`, nên RTMPose
+tự chạy CPU trong khi YOLO26s chạy CUDA. HPI-GCN checkpoint `models/rtmlib/hub/checkpoints/best_hpi.pt`
+có sẵn nhưng bị disable do mismatch số joints (checkpoint: 50 joints, RTMPose: 17 COCO joints).
+Pipeline hiện chạy rule-only mode. Chi phí pose tăng gần tuyến tính theo số người.
 
 Smoke benchmark ngày 23-06-2026 trên máy hiện tại, ảnh 1080x810 có 5 người:
 YOLO26s + ByteTrack khoảng 19.3 FPS; toàn pipeline detector + RTMPose khoảng
@@ -53,10 +55,10 @@ test set có annotation.
 
 ## Safety gate bắt buộc
 
-- MMAction2 ST-GCN là dependency bắt buộc. Nếu thiếu `mmaction2/mmengine/mmcv`,
-  thiếu config, hoặc thiếu checkpoint `models/mmaction2/stgcn_fall.pth`, pipeline
-  dừng ngay lúc khởi tạo thay vì âm thầm chạy rule-only.
-- `confirmed` cần đồng thuận giữa ST-GCN và bằng chứng động học/thời gian.
+- Pipeline dùng rule-based detection với threshold trong [`configs/default.yaml`](configs/default.yaml).
+  Các ngưỡng này chỉ là giá trị khởi tạo, không phải ngưỡng production đã calibration.
+- HPI-GCN checkpoint có sẵn nhưng bị disable do mismatch số joints với RTMPose (17 COCO joints).
+  Pipeline hiện chạy rule-only mode và vẫn hoạt động hiệu quả.
 - Không dùng accuracy theo frame làm tiêu chí release. Tối thiểu phải báo cáo:
   event sensitivity, event precision, false alarms/camera-hour, missed falls,
   detection delay p50/p95 và kết quả theo từng camera/ánh sáng/nhóm đối tượng.
@@ -73,8 +75,8 @@ test set có annotation.
 
 Ultralytics YOLO26 được cung cấp theo AGPL-3.0 hoặc Enterprise License. Nếu sản phẩm
 closed-source hoặc thương mại, team pháp lý phải xác nhận Enterprise License trước
-khi tích hợp sâu. RTMPose/MMPose và phần ST-GCN tham chiếu OpenMMLab dùng
-Apache-2.0; vẫn cần lập SBOM và kiểm tra license của toàn bộ dependency/model/data.
+khi tích hợp sâu. RTMPose/MMPose tham chiếu OpenMMLab dùng Apache-2.0; vẫn cần lập
+SBOM và kiểm tra license của toàn bộ dependency/model/data.
 
 ## Cài đặt
 
@@ -83,22 +85,14 @@ và đã có Torch, Ultralytics, RTMLib, OpenCV.
 
 ```powershell
 python -m venv .venv
-\.\.venv\Scripts\python.exe -m pip install -U pip
-\.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -U pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Nếu bạn cần nhánh ST-GCN/MMAction2, cài thêm trên Python 3.11 hoặc 3.12:
-
-```powershell
-\.\.venv\Scripts\python.exe -m pip install -U openmim
-\.\.venv\Scripts\python.exe -m mim install mmengine
-\.\.venv\Scripts\python.exe -m mim install "mmcv>=2.0.0,<2.2.0"
-\.\.venv\Scripts\python.exe -m pip install mmaction2
-```
-
-Lần chạy đầu sẽ tải `yolo26s.pt` và RTMPose-s. RTMPose được cache dưới
-`models/rtmlib`. Trước khi inference production, cần train/fine-tune ST-GCN và có
-checkpoint tại `models/mmaction2/stgcn_fall.pth`.
+Lần chạy đầu sẽ tải `yolo26s.pt` nếu chưa có. RTMPose dùng checkpoint local
+`models/rtmlib/hub/checkpoints/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.onnx`
+và vẫn nằm trong cache dưới `models/rtmlib`. Trước khi inference production, cần có
+HPI-GCN checkpoint tại `models/rtmlib/hub/checkpoints/best_hpi.pt`.
 
 ## Chạy inference
 
@@ -125,49 +119,9 @@ Xem trực tiếp khi xử lý video:
 
 Nhấn `q` hoặc `Esc` để dừng. `--display` vẫn được giữ làm alias tương thích.
 
-Khi ST-GCN/MMAction2 chưa sẵn sàng, CLI sẽ dừng với lỗi rõ ràng. Các ngưỡng trong
+Khi HPI-GCN chưa sẵn sàng, CLI sẽ dừng với lỗi rõ ràng. Các ngưỡng trong
 [`configs/default.yaml`](configs/default.yaml) chỉ là giá trị khởi tạo, không phải
 ngưỡng production đã calibration.
-
-## Dữ liệu ST-GCN
-
-Dataset ST-GCN dùng format `PoseDataset` của MMAction2, lưu trong một file `.pkl`.
-Mỗi annotation chứa:
-
-- `frame_dir`: ID duy nhất của sample.
-- `label`: `0=normal`, `1=falling`, `2=lying`.
-- `img_shape`, `original_shape`, `total_frames`.
-- `keypoint`: `float32 [M, T, 17, 2]`, hiện `M=1`.
-- `keypoint_score`: `float32 [M, T, 17]`.
-
-Format này khớp trực tiếp với `PreNormalize2D -> GenSkeFeat -> FormatGCNInput` của
-MMAction2 trong [`configs/mmaction2/stgcn_fall.py`](configs/mmaction2/stgcn_fall.py).
-
-Tạo feature bằng manifest đã chia split:
-
-```powershell
-.\.venv\Scripts\python.exe -m fall_detection.dataset `
-  --manifest data\manifest.csv `
-  --output data\mmaction\fall_skeleton.pkl
-```
-
-Schema nằm tại [`data/manifest.example.csv`](data/manifest.example.csv).
-`target_x,target_y` là tọa độ chuẩn hóa của người cần theo dõi ở đầu clip; nếu bỏ
-trống tool chọn người có bbox lớn nhất. Với cảnh nhiều người, nên luôn annotation
-target để tránh label sai người.
-
-Trainer dùng Runner của MMAction2, không còn model PyTorch tự viết:
-
-```powershell
-.\.venv\Scripts\python.exe -m fall_detection.training `
-  --config configs\mmaction2\stgcn_fall.py `
-  --ann-file data\mmaction\fall_skeleton.pkl `
-  --work-dir work_dirs\stgcn_fall `
-  --export-checkpoint models\mmaction2\stgcn_fall.pth
-```
-
-Không release model chỉ dựa trên validation này. Cần một test set khóa, độc lập về
-subject/camera/site, và calibration threshold trên validation riêng.
 
 ## Kiểm thử
 
@@ -175,8 +129,8 @@ subject/camera/site, và calibration threshold trên validation riêng.
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Test hiện có kiểm tra format MMAction2 skeleton sample, fail-fast khi thiếu ST-GCN
-checkpoint, nối ID sau ID switch, fall đột ngột và nằm kéo dài.
+Test hiện có kiểm tra fail-fast khi thiếu HPI-GCN checkpoint, nối ID sau ID switch,
+fall đột ngột và nằm kéo dài.
 
 ## Việc cần làm trước production
 
